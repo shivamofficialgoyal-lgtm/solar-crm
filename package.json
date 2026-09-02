@@ -1,0 +1,17 @@
+{
+  "name": "solar-crm-v1",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Role-based Australian solar lead CRM with protected customer phone numbers.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2"
+  }
+}
