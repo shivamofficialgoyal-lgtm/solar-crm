@@ -2,8 +2,14 @@ const app = document.getElementById("app");
 let currentUser = null;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+const API_URL = "https://solar-crm-uudg.onrender.com";
+
 async function api(url, options={}) {
-  const r = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
+  const r = await fetch(API_URL + url, {
+    credentials: "include",
+    headers: {"Content-Type":"application/json"},
+    ...options
+  });
   const data = await r.json().catch(()=>({}));
   if (!r.ok) throw new Error(data.error || "Request failed");
   return data;
