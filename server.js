@@ -273,7 +273,7 @@ app.patch("/api/admin/leads/:id/status", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("*", (req, res) => {
+app.get("/{*splat}", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
