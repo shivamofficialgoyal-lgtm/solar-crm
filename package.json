@@ -1,16 +1,15 @@
 {
-  "name": "solar-crm-v2",
+  "name": "solar-crm",
   "version": "2.0.0",
-  "private": true,
-  "description": "Australian solar lead CRM with Admin, QC Manager and Agent roles.",
+  "description": "Solar CRM V2",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.10.0",
+    "cors": "^2.8.5",
     "express": "^5.1.0",
     "express-session": "^1.18.2"
   }
