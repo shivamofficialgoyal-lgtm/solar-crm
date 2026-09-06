@@ -1,8 +1,8 @@
 {
-  "name": "solar-crm-v1",
-  "version": "1.0.0",
+  "name": "solar-crm-v2",
+  "version": "2.0.0",
   "private": true,
-  "description": "Role-based Australian solar lead CRM with protected customer phone numbers.",
+  "description": "Australian solar lead CRM with Admin, QC Manager and Agent roles.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -12,7 +12,6 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.10.0",
     "express": "^5.1.0",
-    "express-session": "^1.18.2",
-    "cors": "^2.8.5"
+    "express-session": "^1.18.2"
   }
 }
