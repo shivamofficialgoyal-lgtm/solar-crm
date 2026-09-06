@@ -1,4 +1,5 @@
 const express = require("express");
+const cors = require("cors");
 const session = require("express-session");
 const bcrypt = require("bcryptjs");
 const Database = require("better-sqlite3");
@@ -192,24 +193,43 @@ function ensureInitialAdmin() {
 
 ensureInitialAdmin();
 
-/* TEMPORARY ADMIN PASSWORD RESET
-   Remove this section after the password has been reset.
+/*
+  TEMPORARY ADMIN PASSWORD RESET
+
+  This uses the RESET_ADMIN_PASSWORD
+  environment variable that we added in Render.
 */
+
 if (process.env.RESET_ADMIN_PASSWORD) {
-  const newPassword = process.env.RESET_ADMIN_PASSWORD;
+  const newPassword =
+    process.env.RESET_ADMIN_PASSWORD;
 
   if (newPassword.length >= 8) {
-    db.prepare(`
-      UPDATE users
-      SET password_hash=?
-      WHERE username='admin'
-    `).run(
-      bcrypt.hashSync(newPassword, 12)
-    );
+    const result =
+      db.prepare(`
+        UPDATE users
+        SET password_hash=?
+        WHERE username='admin'
+      `).run(
+        bcrypt.hashSync(newPassword, 12)
+      );
 
-    console.log("Admin password reset successfully.");
+    console.log(
+      `Admin password reset. Updated rows: ${result.changes}`
+    );
   }
 }
+
+/*
+  CORS
+*/
+
+app.use(
+  cors({
+    origin: true,
+    credentials: true
+  })
+);
 
 app.use(
   express.json({
@@ -230,11 +250,9 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: "lax",
-      secure:
-        process.env.NODE_ENV === "production",
-      maxAge:
-        8 * 60 * 60 * 1000
+      sameSite: "none",
+      secure: true,
+      maxAge: 8 * 60 * 60 * 1000
     }
   })
 );
@@ -293,7 +311,8 @@ function requireRole(...roles) {
 
     if (!roles.includes(req.session.user.role)) {
       return res.status(403).json({
-        error: "You do not have permission for this action"
+        error:
+          "You do not have permission for this action"
       });
     }
 
@@ -301,7 +320,8 @@ function requireRole(...roles) {
   };
 }
 
-const requireAdmin = requireRole("admin");
+const requireAdmin =
+  requireRole("admin");
 
 function validateLead(b) {
   const required = [
@@ -393,44 +413,57 @@ function validateLead(b) {
   return null;
 }
 
-app.post("/api/login", (req, res) => {
-  const username = clean(req.body.username);
-  const password = req.body.password || "";
+/*
+  LOGIN
+*/
 
-  const user = db
-    .prepare(
-      "SELECT * FROM users WHERE username=? AND active=1"
-    )
-    .get(username);
+app.post(
+  "/api/login",
+  (req, res) => {
+    const username =
+      clean(req.body.username);
 
-  if (
-    !user ||
-    !bcrypt.compareSync(
-      password,
-      user.password_hash
-    )
-  ) {
-    return res.status(401).json({
-      error: "Invalid ID or password"
+    const password =
+      req.body.password || "";
+
+    const user =
+      db
+        .prepare(
+          "SELECT * FROM users WHERE username=? AND active=1"
+        )
+        .get(username);
+
+    if (
+      !user ||
+      !bcrypt.compareSync(
+        password,
+        user.password_hash
+      )
+    ) {
+      return res.status(401).json({
+        error:
+          "Invalid ID or password"
+      });
+    }
+
+    req.session.user = {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      displayName:
+        user.display_name
+    };
+
+    audit(
+      user.id,
+      "LOGIN"
+    );
+
+    res.json({
+      user: req.session.user
     });
   }
-
-  req.session.user = {
-    id: user.id,
-    username: user.username,
-    role: user.role,
-    displayName: user.display_name
-  };
-
-  audit(
-    user.id,
-    "LOGIN"
-  );
-
-  res.json({
-    user: req.session.user
-  });
-});
+);
 
 app.post(
   "/api/logout",
@@ -442,7 +475,10 @@ app.post(
     );
 
     req.session.destroy(
-      () => res.json({ ok: true })
+      () =>
+        res.json({
+          ok: true
+        })
     );
   }
 );
@@ -451,10 +487,16 @@ app.get(
   "/api/me",
   (req, res) => {
     res.json({
-      user: req.session.user || null
+      user:
+        req.session.user ||
+        null
     });
   }
 );
+
+/*
+  AGENT LEADS
+*/
 
 app.post(
   "/api/leads",
@@ -536,7 +578,8 @@ app.post(
         )
       `)
       .run({
-        lead_code: leadCode,
+        lead_code:
+          leadCode,
         agent_id:
           req.session.user.id,
         product_type:
@@ -564,7 +607,9 @@ app.post(
         under_75:
           clean(b.under_75),
         number_of_panels:
-          clean(b.number_of_panels),
+          clean(
+            b.number_of_panels
+          ),
         panels_age:
           clean(b.panels_age),
         battery:
@@ -576,11 +621,17 @@ app.post(
         email:
           clean(b.email),
         appointment_date:
-          clean(b.appointment_date),
+          clean(
+            b.appointment_date
+          ),
         appointment_time:
-          clean(b.appointment_time),
+          clean(
+            b.appointment_time
+          ),
         additional_comment:
-          clean(b.additional_comment)
+          clean(
+            b.additional_comment
+          )
       });
 
     audit(
@@ -631,13 +682,19 @@ app.get(
         WHERE agent_id=?
         ORDER BY id DESC
       `)
-      .all(req.session.user.id);
+      .all(
+        req.session.user.id
+      );
 
     res.json({
       leads: rows
     });
   }
 );
+
+/*
+  QC
+*/
 
 app.get(
   "/api/qc/leads",
@@ -691,15 +748,20 @@ app.get(
         "Unqualified"
       ].includes(status)
     ) {
-      sql += " WHERE l.status=?";
+      sql +=
+        " WHERE l.status=?";
+
       params.push(status);
     }
 
-    sql += " ORDER BY l.id DESC";
+    sql +=
+      " ORDER BY l.id DESC";
 
     res.json({
       leads:
-        db.prepare(sql).all(...params)
+        db
+          .prepare(sql)
+          .all(...params)
     });
   }
 );
@@ -792,6 +854,10 @@ app.patch(
   }
 );
 
+/*
+  ADMIN LEADS
+*/
+
 app.get(
   "/api/admin/leads",
   requireAdmin,
@@ -861,7 +927,9 @@ app.get(
 
     res.json({
       leads:
-        db.prepare(sql).all(...params)
+        db
+          .prepare(sql)
+          .all(...params)
     });
   }
 );
@@ -931,6 +999,10 @@ app.get(
     });
   }
 );
+
+/*
+  ADMIN USERS
+*/
 
 app.get(
   "/api/admin/users",
@@ -1135,6 +1207,10 @@ app.patch(
   }
 );
 
+/*
+  ADMIN STATUS
+*/
+
 app.patch(
   "/api/admin/leads/:id/status",
   requireAdmin,
@@ -1180,6 +1256,10 @@ app.patch(
     });
   }
 );
+
+/*
+  EXPORT
+*/
 
 app.get(
   "/api/admin/export",
@@ -1297,6 +1377,10 @@ app.get(
     );
   }
 );
+
+/*
+  FRONTEND
+*/
 
 app.get(
   "/",
