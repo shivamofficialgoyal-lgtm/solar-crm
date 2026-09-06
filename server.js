@@ -15,7 +15,9 @@ const SESSION_SECRET =
 const dataDir = path.join(__dirname, "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new Database(path.join(dataDir, "crm.sqlite"));
+const db = new Database(
+  path.join(dataDir, "crm.sqlite")
+);
 
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
@@ -74,7 +76,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `);
 
-// Migrate V1 users table so QC Manager becomes a valid role.
+// V1 → V2 users migration
 const userSql =
   db
     .prepare(
@@ -107,7 +109,11 @@ if (!userSql.includes("'qc_manager'")) {
       id,
       username,
       password_hash,
-      CASE WHEN role='admin' THEN 'admin' ELSE 'agent' END,
+      CASE
+        WHEN role='admin'
+        THEN 'admin'
+        ELSE 'agent'
+      END,
       display_name,
       active,
       created_at
@@ -118,11 +124,18 @@ if (!userSql.includes("'qc_manager'")) {
   `);
 }
 
-function addColumnIfMissing(table, column, definition) {
-  const exists = db
-    .prepare(`PRAGMA table_info(${table})`)
-    .all()
-    .some(x => x.name === column);
+function addColumnIfMissing(
+  table,
+  column,
+  definition
+) {
+  const exists =
+    db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all()
+      .some(
+        x => x.name === column
+      );
 
   if (!exists) {
     db.exec(
@@ -131,29 +144,58 @@ function addColumnIfMissing(table, column, definition) {
   }
 }
 
-addColumnIfMissing("leads", "qc_comment", "TEXT");
-addColumnIfMissing("leads", "qc_by", "INTEGER");
-addColumnIfMissing("leads", "qc_at", "TEXT");
+addColumnIfMissing(
+  "leads",
+  "qc_comment",
+  "TEXT"
+);
+
+addColumnIfMissing(
+  "leads",
+  "qc_by",
+  "INTEGER"
+);
+
+addColumnIfMissing(
+  "leads",
+  "qc_at",
+  "TEXT"
+);
 
 db.prepare(`
   UPDATE leads
   SET status='Pending QC'
   WHERE status IS NULL
-  OR status NOT IN ('Pending QC','Qualified','Unqualified')
+  OR status NOT IN (
+    'Pending QC',
+    'Qualified',
+    'Unqualified'
+  )
 `).run();
 
 function ensureInitialAdmin() {
-  const count = db
-    .prepare("SELECT COUNT(*) AS n FROM users WHERE role='admin'")
-    .get().n;
+  const count =
+    db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM users WHERE role='admin'"
+      )
+      .get().n;
 
   if (count) return;
 
-  const username = process.env.ADMIN_USERNAME || "admin";
-  const password =
-    process.env.ADMIN_PASSWORD || "ChangeMe123!";
+  const username =
+    process.env.ADMIN_USERNAME ||
+    "admin";
 
-  const hash = bcrypt.hashSync(password, 12);
+  const password =
+    process.env.ADMIN_PASSWORD ||
+    "ChangeMe123!";
+
+  const hash =
+    bcrypt.hashSync(
+      password,
+      12
+    );
 
   db.prepare(`
     INSERT INTO users
@@ -167,30 +209,23 @@ function ensureInitialAdmin() {
   );
 
   console.log(
-    `Initial admin created: ${username}. Change the password after first login.`
+    `Initial admin created: ${username}`
   );
 }
 
 ensureInitialAdmin();
 
-// TEMPORARY ADMIN PASSWORD RESET
-// Remove this block after successfully logging in.
-const resetAdminPassword =
-  bcrypt.hashSync("Admin12345!", 12);
-
-db.prepare(
-  "UPDATE users SET password_hash=? WHERE username=?"
-).run(
-  resetAdminPassword,
-  "admin"
+app.use(
+  express.json({
+    limit: "150kb"
+  })
 );
 
-console.log(
-  "TEMPORARY ADMIN PASSWORD RESET COMPLETE"
+app.use(
+  express.urlencoded({
+    extended: false
+  })
 );
-
-app.use(express.json({ limit: "150kb" }));
-app.use(express.urlencoded({ extended: false }));
 
 app.use(
   session({
@@ -200,14 +235,19 @@ app.use(
     cookie: {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 8 * 60 * 60 * 1000
+      secure:
+        process.env.NODE_ENV ===
+        "production",
+      maxAge:
+        8 * 60 * 60 * 1000
     }
   })
 );
 
 app.use(
-  express.static(path.join(__dirname, "public"))
+  express.static(
+    path.join(__dirname, "public")
+  )
 );
 
 const ROLES = [
@@ -238,21 +278,33 @@ function audit(
   );
 }
 
-function requireAuth(req, res, next) {
+function requireAuth(
+  req,
+  res,
+  next
+) {
   if (!req.session.user) {
     return res.status(401).json({
-      error: "Not authenticated"
+      error:
+        "Not authenticated"
     });
   }
 
   next();
 }
 
-function requireRole(...roles) {
-  return (req, res, next) => {
+function requireRole(
+  ...roles
+) {
+  return (
+    req,
+    res,
+    next
+  ) => {
     if (!req.session.user) {
       return res.status(401).json({
-        error: "Not authenticated"
+        error:
+          "Not authenticated"
       });
     }
 
@@ -294,64 +346,84 @@ function validateLead(b) {
     "appointment_time"
   ];
 
-  for (const key of required) {
+  for (
+    const key of required
+  ) {
     if (!clean(b[key])) {
       return `${key} is required`;
     }
   }
 
   if (
-    !["Callback", "Appointment"]
-      .includes(clean(b.product_type))
+    ![
+      "Callback",
+      "Appointment"
+    ].includes(
+      clean(b.product_type)
+    )
   ) {
     return "Invalid product type";
   }
 
   if (
-    !["No Solar", "Has Solar"]
-      .includes(clean(b.solar_status))
+    ![
+      "No Solar",
+      "Has Solar"
+    ].includes(
+      clean(b.solar_status)
+    )
   ) {
     return "Invalid solar status";
   }
 
   if (
-    !/^[0-9 +()\-]{7,20}$/
-      .test(clean(b.mobile_number))
+    !/^[0-9 +()\-]{7,20}$/.test(
+      clean(b.mobile_number)
+    )
   ) {
     return "Invalid mobile number";
   }
 
   if (
-    !/^[0-9]{4}$/
-      .test(clean(b.postcode))
+    !/^[0-9]{4}$/.test(
+      clean(b.postcode)
+    )
   ) {
     return "Postcode must be 4 digits";
   }
 
   if (
-    !["Yes", "No"]
-      .includes(clean(b.free_standing))
+    !["Yes", "No"].includes(
+      clean(b.free_standing)
+    )
   ) {
     return "Invalid Free Standing value";
   }
 
   if (
-    !["Yes", "No"]
-      .includes(clean(b.under_75))
+    !["Yes", "No"].includes(
+      clean(b.under_75)
+    )
   ) {
     return "Invalid Under 75 value";
   }
 
   if (
-    b.solar_status === "Has Solar" &&
+    b.solar_status ===
+      "Has Solar" &&
     (
-      !clean(b.number_of_panels) ||
+      !clean(
+        b.number_of_panels
+      ) ||
       !clean(b.panels_age) ||
-      !["Yes", "No"]
-        .includes(clean(b.battery))
+      !["Yes", "No"].includes(
+        clean(b.battery)
+      )
     )
   ) {
-    return "Number of panels, panel age and battery are required for Has Solar";
+    return (
+      "Number of panels, panel age and battery are required for Has Solar"
+    );
   }
 
   return null;
@@ -367,11 +439,12 @@ app.post(
     const password =
       req.body.password || "";
 
-    const user = db
-      .prepare(
-        "SELECT * FROM users WHERE username=? AND active=1"
-      )
-      .get(username);
+    const user =
+      db
+        .prepare(
+          "SELECT * FROM users WHERE username=? AND active=1"
+        )
+        .get(username);
 
     if (
       !user ||
@@ -390,7 +463,8 @@ app.post(
       id: user.id,
       username: user.username,
       role: user.role,
-      displayName: user.display_name
+      displayName:
+        user.display_name
     };
 
     audit(
@@ -399,7 +473,8 @@ app.post(
     );
 
     res.json({
-      user: req.session.user
+      user:
+        req.session.user
     });
   }
 );
@@ -415,11 +490,15 @@ app.post(
     );
 
     req.session.destroy(
-      () => res.json({ ok: true })
+      () =>
+        res.json({
+          ok: true
+        })
     );
   }
 );
 
+// CURRENT USER
 app.get(
   "/api/me",
   (req, res) => {
@@ -533,7 +612,9 @@ app.post(
         postcode:
           clean(b.postcode),
         free_standing:
-          clean(b.free_standing),
+          clean(
+            b.free_standing
+          ),
         roof_type:
           clean(b.roof_type),
         bill:
@@ -541,7 +622,9 @@ app.post(
         under_75:
           clean(b.under_75),
         number_of_panels:
-          clean(b.number_of_panels),
+          clean(
+            b.number_of_panels
+          ),
         panels_age:
           clean(b.panels_age),
         battery:
@@ -553,9 +636,13 @@ app.post(
         email:
           clean(b.email),
         appointment_date:
-          clean(b.appointment_date),
+          clean(
+            b.appointment_date
+          ),
         appointment_time:
-          clean(b.appointment_time),
+          clean(
+            b.appointment_time
+          ),
         additional_comment:
           clean(
             b.additional_comment
@@ -581,39 +668,40 @@ app.get(
   requireRole("agent"),
   (req, res) => {
     const rows =
-      db.prepare(`
-        SELECT
-          id,
-          lead_code,
-          product_type,
-          solar_status,
-          first_name,
-          last_name,
-          suburb,
-          postcode,
-          free_standing,
-          roof_type,
-          bill,
-          under_75,
-          number_of_panels,
-          panels_age,
-          battery,
-          sunlight,
-          quote,
-          email,
-          appointment_date,
-          appointment_time,
-          additional_comment,
-          status,
-          qc_comment,
-          created_at
-        FROM leads
-        WHERE agent_id=?
-        ORDER BY id DESC
-      `)
-      .all(
-        req.session.user.id
-      );
+      db
+        .prepare(`
+          SELECT
+            id,
+            lead_code,
+            product_type,
+            solar_status,
+            first_name,
+            last_name,
+            suburb,
+            postcode,
+            free_standing,
+            roof_type,
+            bill,
+            under_75,
+            number_of_panels,
+            panels_age,
+            battery,
+            sunlight,
+            quote,
+            email,
+            appointment_date,
+            appointment_time,
+            additional_comment,
+            status,
+            qc_comment,
+            created_at
+          FROM leads
+          WHERE agent_id=?
+          ORDER BY id DESC
+        `)
+        .all(
+          req.session.user.id
+        );
 
     res.json({
       leads: rows
@@ -676,6 +764,7 @@ app.get(
     ) {
       sql +=
         " WHERE l.status=?";
+
       params.push(status);
     }
 
@@ -684,7 +773,8 @@ app.get(
 
     res.json({
       leads:
-        db.prepare(sql)
+        db
+          .prepare(sql)
           .all(...params)
     });
   }
@@ -696,8 +786,10 @@ app.get(
   requireRole("qc_manager"),
   (req, res) => {
     const get =
-      s => db.prepare(s)
-        .get().n;
+      s =>
+        db
+          .prepare(s)
+          .get().n;
 
     res.json({
       pending: get(
@@ -725,11 +817,15 @@ app.patch(
       clean(req.body.status);
 
     const comment =
-      clean(req.body.qc_comment);
+      clean(
+        req.body.qc_comment
+      );
 
     if (
-      !["Qualified", "Unqualified"]
-        .includes(status)
+      ![
+        "Qualified",
+        "Unqualified"
+      ].includes(status)
     ) {
       return res.status(400).json({
         error:
@@ -770,8 +866,11 @@ app.patch(
 
     audit(
       req.session.user.id,
-      "QC_REVIEW:" + status,
-      Number(req.params.id)
+      "QC_REVIEW:" +
+        status,
+      Number(
+        req.params.id
+      )
     );
 
     res.json({
@@ -823,8 +922,12 @@ app.get(
         "%" + q + "%";
 
       params.push(
-        x, x, x,
-        x, x, x
+        x,
+        x,
+        x,
+        x,
+        x,
+        x
       );
     }
 
@@ -846,7 +949,8 @@ app.get(
 
     res.json({
       leads:
-        db.prepare(sql)
+        db
+          .prepare(sql)
           .all(...params)
     });
   }
@@ -858,37 +962,40 @@ app.get(
   requireAdmin,
   (req, res) => {
     const get =
-      s => db.prepare(s)
-        .get().n;
+      s =>
+        db
+          .prepare(s)
+          .get().n;
 
     const agents =
-      db.prepare(`
-        SELECT
-          u.display_name,
-          u.username,
-          COUNT(l.id) lead_count,
-          SUM(
-            CASE
-              WHEN l.status='Qualified'
-              THEN 1
-              ELSE 0
-            END
-          ) qualified,
-          SUM(
-            CASE
-              WHEN l.status='Unqualified'
-              THEN 1
-              ELSE 0
-            END
-          ) unqualified
-        FROM users u
-        LEFT JOIN leads l
-          ON u.id=l.agent_id
-        WHERE u.role='agent'
-        GROUP BY u.id
-        ORDER BY lead_count DESC
-      `)
-      .all();
+      db
+        .prepare(`
+          SELECT
+            u.display_name,
+            u.username,
+            COUNT(l.id) lead_count,
+            SUM(
+              CASE
+                WHEN l.status='Qualified'
+                THEN 1
+                ELSE 0
+              END
+            ) qualified,
+            SUM(
+              CASE
+                WHEN l.status='Unqualified'
+                THEN 1
+                ELSE 0
+              END
+            ) unqualified
+          FROM users u
+          LEFT JOIN leads l
+            ON u.id=l.agent_id
+          WHERE u.role='agent'
+          GROUP BY u.id
+          ORDER BY lead_count DESC
+        `)
+        .all();
 
     res.json({
       total: get(
@@ -927,18 +1034,19 @@ app.get(
   (req, res) => {
     res.json({
       users:
-        db.prepare(`
-          SELECT
-            id,
-            username,
-            display_name,
-            role,
-            active,
-            created_at
-          FROM users
-          ORDER BY id DESC
-        `)
-        .all()
+        db
+          .prepare(`
+            SELECT
+              id,
+              username,
+              display_name,
+              role,
+              active,
+              created_at
+            FROM users
+            ORDER BY id DESC
+          `)
+          .all()
     });
   }
 );
@@ -952,7 +1060,9 @@ app.post(
       clean(req.body.username);
 
     const displayName =
-      clean(req.body.display_name);
+      clean(
+        req.body.display_name
+      );
 
     const role =
       clean(req.body.role);
@@ -961,8 +1071,9 @@ app.post(
       req.body.password || "";
 
     if (
-      !/^[A-Za-z0-9._-]{3,40}$/
-        .test(username)
+      !/^[A-Za-z0-9._-]{3,40}$/.test(
+        username
+      )
     ) {
       return res.status(400).json({
         error:
@@ -1041,7 +1152,8 @@ app.patch(
       req.body.active ? 1 : 0;
 
     if (
-      id === req.session.user.id &&
+      id ===
+        req.session.user.id &&
       !active
     ) {
       return res.status(400).json({
@@ -1163,8 +1275,11 @@ app.patch(
 
     audit(
       req.session.user.id,
-      "ADMIN_STATUS:" + status,
-      Number(req.params.id)
+      "ADMIN_STATUS:" +
+        status,
+      Number(
+        req.params.id
+      )
     );
 
     res.json({
@@ -1179,17 +1294,18 @@ app.get(
   requireAdmin,
   (req, res) => {
     const rows =
-      db.prepare(`
-        SELECT
-          l.*,
-          u.username AS agent_username,
-          u.display_name AS agent_name
-        FROM leads l
-        JOIN users u
-          ON u.id=l.agent_id
-        ORDER BY l.id DESC
-      `)
-      .all();
+      db
+        .prepare(`
+          SELECT
+            l.*,
+            u.username AS agent_username,
+            u.display_name AS agent_name
+          FROM leads l
+          JOIN users u
+            ON u.id=l.agent_id
+          ORDER BY l.id DESC
+        `)
+        .all();
 
     const headers = [
       "Lead ID",
@@ -1223,7 +1339,10 @@ app.get(
 
     const val = v =>
       `"${String(v ?? "")
-        .replace(/"/g, '""')}"`;
+        .replace(
+          /"/g,
+          '""'
+        )}"`;
 
     const lines = [
       headers
@@ -1231,7 +1350,9 @@ app.get(
         .join(",")
     ];
 
-    for (const r of rows) {
+    for (
+      const r of rows
+    ) {
       lines.push(
         [
           r.lead_code,
@@ -1262,8 +1383,8 @@ app.get(
           r.qc_comment,
           r.created_at
         ]
-        .map(val)
-        .join(",")
+          .map(val)
+          .join(",")
       );
     }
 
@@ -1284,14 +1405,12 @@ app.get(
 
     res.send(
       "\uFEFF" +
-      lines.join("\n")
+        lines.join("\n")
     );
   }
 );
 
 // FRONTEND
-// Express 5-compatible route.
-// Do NOT change this to app.get("*").
 app.get(
   "/",
   (req, res) => {
