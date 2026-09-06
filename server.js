@@ -8,6 +8,7 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
 const SESSION_SECRET =
   process.env.SESSION_SECRET ||
   crypto.randomBytes(32).toString("hex");
@@ -76,7 +77,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 `);
 
-// V1 → V2 users migration
 const userSql =
   db
     .prepare(
@@ -124,18 +124,12 @@ if (!userSql.includes("'qc_manager'")) {
   `);
 }
 
-function addColumnIfMissing(
-  table,
-  column,
-  definition
-) {
+function addColumnIfMissing(table, column, definition) {
   const exists =
     db
       .prepare(`PRAGMA table_info(${table})`)
       .all()
-      .some(
-        x => x.name === column
-      );
+      .some(x => x.name === column);
 
   if (!exists) {
     db.exec(
@@ -144,23 +138,9 @@ function addColumnIfMissing(
   }
 }
 
-addColumnIfMissing(
-  "leads",
-  "qc_comment",
-  "TEXT"
-);
-
-addColumnIfMissing(
-  "leads",
-  "qc_by",
-  "INTEGER"
-);
-
-addColumnIfMissing(
-  "leads",
-  "qc_at",
-  "TEXT"
-);
+addColumnIfMissing("leads", "qc_comment", "TEXT");
+addColumnIfMissing("leads", "qc_by", "INTEGER");
+addColumnIfMissing("leads", "qc_at", "TEXT");
 
 db.prepare(`
   UPDATE leads
@@ -192,10 +172,7 @@ function ensureInitialAdmin() {
     "ChangeMe123!";
 
   const hash =
-    bcrypt.hashSync(
-      password,
-      12
-    );
+    bcrypt.hashSync(password, 12);
 
   db.prepare(`
     INSERT INTO users
@@ -214,6 +191,25 @@ function ensureInitialAdmin() {
 }
 
 ensureInitialAdmin();
+
+/* TEMPORARY ADMIN PASSWORD RESET
+   Remove this section after the password has been reset.
+*/
+if (process.env.RESET_ADMIN_PASSWORD) {
+  const newPassword = process.env.RESET_ADMIN_PASSWORD;
+
+  if (newPassword.length >= 8) {
+    db.prepare(`
+      UPDATE users
+      SET password_hash=?
+      WHERE username='admin'
+    `).run(
+      bcrypt.hashSync(newPassword, 12)
+    );
+
+    console.log("Admin password reset successfully.");
+  }
+}
 
 app.use(
   express.json({
@@ -236,8 +232,7 @@ app.use(
       httpOnly: true,
       sameSite: "lax",
       secure:
-        process.env.NODE_ENV ===
-        "production",
+        process.env.NODE_ENV === "production",
       maxAge:
         8 * 60 * 60 * 1000
     }
@@ -278,44 +273,27 @@ function audit(
   );
 }
 
-function requireAuth(
-  req,
-  res,
-  next
-) {
+function requireAuth(req, res, next) {
   if (!req.session.user) {
     return res.status(401).json({
-      error:
-        "Not authenticated"
+      error: "Not authenticated"
     });
   }
 
   next();
 }
 
-function requireRole(
-  ...roles
-) {
-  return (
-    req,
-    res,
-    next
-  ) => {
+function requireRole(...roles) {
+  return (req, res, next) => {
     if (!req.session.user) {
       return res.status(401).json({
-        error:
-          "Not authenticated"
+        error: "Not authenticated"
       });
     }
 
-    if (
-      !roles.includes(
-        req.session.user.role
-      )
-    ) {
+    if (!roles.includes(req.session.user.role)) {
       return res.status(403).json({
-        error:
-          "You do not have permission for this action"
+        error: "You do not have permission for this action"
       });
     }
 
@@ -323,8 +301,7 @@ function requireRole(
   };
 }
 
-const requireAdmin =
-  requireRole("admin");
+const requireAdmin = requireRole("admin");
 
 function validateLead(b) {
   const required = [
@@ -346,19 +323,14 @@ function validateLead(b) {
     "appointment_time"
   ];
 
-  for (
-    const key of required
-  ) {
+  for (const key of required) {
     if (!clean(b[key])) {
       return `${key} is required`;
     }
   }
 
   if (
-    ![
-      "Callback",
-      "Appointment"
-    ].includes(
+    !["Callback", "Appointment"].includes(
       clean(b.product_type)
     )
   ) {
@@ -366,10 +338,7 @@ function validateLead(b) {
   }
 
   if (
-    ![
-      "No Solar",
-      "Has Solar"
-    ].includes(
+    !["No Solar", "Has Solar"].includes(
       clean(b.solar_status)
     )
   ) {
@@ -409,77 +378,60 @@ function validateLead(b) {
   }
 
   if (
-    b.solar_status ===
-      "Has Solar" &&
+    b.solar_status === "Has Solar" &&
     (
-      !clean(
-        b.number_of_panels
-      ) ||
+      !clean(b.number_of_panels) ||
       !clean(b.panels_age) ||
       !["Yes", "No"].includes(
         clean(b.battery)
       )
     )
   ) {
-    return (
-      "Number of panels, panel age and battery are required for Has Solar"
-    );
+    return "Number of panels, panel age and battery are required for Has Solar";
   }
 
   return null;
 }
 
-// LOGIN
-app.post(
-  "/api/login",
-  (req, res) => {
-    const username =
-      clean(req.body.username);
+app.post("/api/login", (req, res) => {
+  const username = clean(req.body.username);
+  const password = req.body.password || "";
 
-    const password =
-      req.body.password || "";
+  const user = db
+    .prepare(
+      "SELECT * FROM users WHERE username=? AND active=1"
+    )
+    .get(username);
 
-    const user =
-      db
-        .prepare(
-          "SELECT * FROM users WHERE username=? AND active=1"
-        )
-        .get(username);
-
-    if (
-      !user ||
-      !bcrypt.compareSync(
-        password,
-        user.password_hash
-      )
-    ) {
-      return res.status(401).json({
-        error:
-          "Invalid ID or password"
-      });
-    }
-
-    req.session.user = {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      displayName:
-        user.display_name
-    };
-
-    audit(
-      user.id,
-      "LOGIN"
-    );
-
-    res.json({
-      user:
-        req.session.user
+  if (
+    !user ||
+    !bcrypt.compareSync(
+      password,
+      user.password_hash
+    )
+  ) {
+    return res.status(401).json({
+      error: "Invalid ID or password"
     });
   }
-);
 
-// LOGOUT
+  req.session.user = {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    displayName: user.display_name
+  };
+
+  audit(
+    user.id,
+    "LOGIN"
+  );
+
+  res.json({
+    user: req.session.user
+  });
+});
+
 app.post(
   "/api/logout",
   requireAuth,
@@ -490,27 +442,20 @@ app.post(
     );
 
     req.session.destroy(
-      () =>
-        res.json({
-          ok: true
-        })
+      () => res.json({ ok: true })
     );
   }
 );
 
-// CURRENT USER
 app.get(
   "/api/me",
   (req, res) => {
     res.json({
-      user:
-        req.session.user ||
-        null
+      user: req.session.user || null
     });
   }
 );
 
-// AGENT CREATE LEAD
 app.post(
   "/api/leads",
   requireRole("agent"),
@@ -591,8 +536,7 @@ app.post(
         )
       `)
       .run({
-        lead_code:
-          leadCode,
+        lead_code: leadCode,
         agent_id:
           req.session.user.id,
         product_type:
@@ -612,9 +556,7 @@ app.post(
         postcode:
           clean(b.postcode),
         free_standing:
-          clean(
-            b.free_standing
-          ),
+          clean(b.free_standing),
         roof_type:
           clean(b.roof_type),
         bill:
@@ -622,9 +564,7 @@ app.post(
         under_75:
           clean(b.under_75),
         number_of_panels:
-          clean(
-            b.number_of_panels
-          ),
+          clean(b.number_of_panels),
         panels_age:
           clean(b.panels_age),
         battery:
@@ -636,17 +576,11 @@ app.post(
         email:
           clean(b.email),
         appointment_date:
-          clean(
-            b.appointment_date
-          ),
+          clean(b.appointment_date),
         appointment_time:
-          clean(
-            b.appointment_time
-          ),
+          clean(b.appointment_time),
         additional_comment:
-          clean(
-            b.additional_comment
-          )
+          clean(b.additional_comment)
       });
 
     audit(
@@ -662,46 +596,42 @@ app.post(
   }
 );
 
-// AGENT LEADS
 app.get(
   "/api/my-leads",
   requireRole("agent"),
   (req, res) => {
     const rows =
-      db
-        .prepare(`
-          SELECT
-            id,
-            lead_code,
-            product_type,
-            solar_status,
-            first_name,
-            last_name,
-            suburb,
-            postcode,
-            free_standing,
-            roof_type,
-            bill,
-            under_75,
-            number_of_panels,
-            panels_age,
-            battery,
-            sunlight,
-            quote,
-            email,
-            appointment_date,
-            appointment_time,
-            additional_comment,
-            status,
-            qc_comment,
-            created_at
-          FROM leads
-          WHERE agent_id=?
-          ORDER BY id DESC
-        `)
-        .all(
-          req.session.user.id
-        );
+      db.prepare(`
+        SELECT
+          id,
+          lead_code,
+          product_type,
+          solar_status,
+          first_name,
+          last_name,
+          suburb,
+          postcode,
+          free_standing,
+          roof_type,
+          bill,
+          under_75,
+          number_of_panels,
+          panels_age,
+          battery,
+          sunlight,
+          quote,
+          email,
+          appointment_date,
+          appointment_time,
+          additional_comment,
+          status,
+          qc_comment,
+          created_at
+        FROM leads
+        WHERE agent_id=?
+        ORDER BY id DESC
+      `)
+      .all(req.session.user.id);
 
     res.json({
       leads: rows
@@ -709,7 +639,6 @@ app.get(
   }
 );
 
-// QC LEADS
 app.get(
   "/api/qc/leads",
   requireRole("qc_manager"),
@@ -762,34 +691,25 @@ app.get(
         "Unqualified"
       ].includes(status)
     ) {
-      sql +=
-        " WHERE l.status=?";
-
+      sql += " WHERE l.status=?";
       params.push(status);
     }
 
-    sql +=
-      " ORDER BY l.id DESC";
+    sql += " ORDER BY l.id DESC";
 
     res.json({
       leads:
-        db
-          .prepare(sql)
-          .all(...params)
+        db.prepare(sql).all(...params)
     });
   }
 );
 
-// QC STATS
 app.get(
   "/api/qc/stats",
   requireRole("qc_manager"),
   (req, res) => {
-    const get =
-      s =>
-        db
-          .prepare(s)
-          .get().n;
+    const get = s =>
+      db.prepare(s).get().n;
 
     res.json({
       pending: get(
@@ -808,7 +728,6 @@ app.get(
   }
 );
 
-// QC REVIEW
 app.patch(
   "/api/qc/leads/:id/review",
   requireRole("qc_manager"),
@@ -817,9 +736,7 @@ app.patch(
       clean(req.body.status);
 
     const comment =
-      clean(
-        req.body.qc_comment
-      );
+      clean(req.body.qc_comment);
 
     if (
       ![
@@ -859,18 +776,14 @@ app.patch(
 
     if (!result.changes) {
       return res.status(404).json({
-        error:
-          "Lead not found"
+        error: "Lead not found"
       });
     }
 
     audit(
       req.session.user.id,
-      "QC_REVIEW:" +
-        status,
-      Number(
-        req.params.id
-      )
+      "QC_REVIEW:" + status,
+      Number(req.params.id)
     );
 
     res.json({
@@ -879,7 +792,6 @@ app.patch(
   }
 );
 
-// ADMIN LEADS
 app.get(
   "/api/admin/leads",
   requireAdmin,
@@ -949,53 +861,46 @@ app.get(
 
     res.json({
       leads:
-        db
-          .prepare(sql)
-          .all(...params)
+        db.prepare(sql).all(...params)
     });
   }
 );
 
-// ADMIN STATS
 app.get(
   "/api/admin/stats",
   requireAdmin,
   (req, res) => {
-    const get =
-      s =>
-        db
-          .prepare(s)
-          .get().n;
+    const get = s =>
+      db.prepare(s).get().n;
 
     const agents =
-      db
-        .prepare(`
-          SELECT
-            u.display_name,
-            u.username,
-            COUNT(l.id) lead_count,
-            SUM(
-              CASE
-                WHEN l.status='Qualified'
-                THEN 1
-                ELSE 0
-              END
-            ) qualified,
-            SUM(
-              CASE
-                WHEN l.status='Unqualified'
-                THEN 1
-                ELSE 0
-              END
-            ) unqualified
-          FROM users u
-          LEFT JOIN leads l
-            ON u.id=l.agent_id
-          WHERE u.role='agent'
-          GROUP BY u.id
-          ORDER BY lead_count DESC
-        `)
-        .all();
+      db.prepare(`
+        SELECT
+          u.display_name,
+          u.username,
+          COUNT(l.id) lead_count,
+          SUM(
+            CASE
+              WHEN l.status='Qualified'
+              THEN 1
+              ELSE 0
+            END
+          ) qualified,
+          SUM(
+            CASE
+              WHEN l.status='Unqualified'
+              THEN 1
+              ELSE 0
+            END
+          ) unqualified
+        FROM users u
+        LEFT JOIN leads l
+          ON u.id=l.agent_id
+        WHERE u.role='agent'
+        GROUP BY u.id
+        ORDER BY lead_count DESC
+      `)
+      .all();
 
     res.json({
       total: get(
@@ -1027,31 +932,28 @@ app.get(
   }
 );
 
-// ADMIN USERS
 app.get(
   "/api/admin/users",
   requireAdmin,
   (req, res) => {
     res.json({
       users:
-        db
-          .prepare(`
-            SELECT
-              id,
-              username,
-              display_name,
-              role,
-              active,
-              created_at
-            FROM users
-            ORDER BY id DESC
-          `)
-          .all()
+        db.prepare(`
+          SELECT
+            id,
+            username,
+            display_name,
+            role,
+            active,
+            created_at
+          FROM users
+          ORDER BY id DESC
+        `)
+        .all()
     });
   }
 );
 
-// CREATE USER
 app.post(
   "/api/admin/users",
   requireAdmin,
@@ -1060,9 +962,7 @@ app.post(
       clean(req.body.username);
 
     const displayName =
-      clean(
-        req.body.display_name
-      );
+      clean(req.body.display_name);
 
     const role =
       clean(req.body.role);
@@ -1090,8 +990,7 @@ app.post(
 
     if (!ROLES.includes(role)) {
       return res.status(400).json({
-        error:
-          "Invalid role"
+        error: "Invalid role"
       });
     }
 
@@ -1112,7 +1011,12 @@ app.post(
       const r =
         db.prepare(`
           INSERT INTO users
-          (username,password_hash,role,display_name)
+          (
+            username,
+            password_hash,
+            role,
+            display_name
+          )
           VALUES (?,?,?,?)
         `)
         .run(
@@ -1140,7 +1044,6 @@ app.post(
   }
 );
 
-// ACTIVATE / DEACTIVATE USER
 app.patch(
   "/api/admin/users/:id/active",
   requireAdmin,
@@ -1152,8 +1055,7 @@ app.patch(
       req.body.active ? 1 : 0;
 
     if (
-      id ===
-        req.session.user.id &&
+      id === req.session.user.id &&
       !active
     ) {
       return res.status(400).json({
@@ -1173,8 +1075,7 @@ app.patch(
 
     if (!r.changes) {
       return res.status(404).json({
-        error:
-          "User not found"
+        error: "User not found"
       });
     }
 
@@ -1191,7 +1092,6 @@ app.patch(
   }
 );
 
-// RESET USER PASSWORD
 app.patch(
   "/api/admin/users/:id/password",
   requireAdmin,
@@ -1220,8 +1120,7 @@ app.patch(
 
     if (!r.changes) {
       return res.status(404).json({
-        error:
-          "User not found"
+        error: "User not found"
       });
     }
 
@@ -1236,7 +1135,6 @@ app.patch(
   }
 );
 
-// ADMIN LEAD STATUS
 app.patch(
   "/api/admin/leads/:id/status",
   requireAdmin,
@@ -1252,8 +1150,7 @@ app.patch(
       ].includes(status)
     ) {
       return res.status(400).json({
-        error:
-          "Invalid status"
+        error: "Invalid status"
       });
     }
 
@@ -1268,18 +1165,14 @@ app.patch(
 
     if (!r.changes) {
       return res.status(404).json({
-        error:
-          "Lead not found"
+        error: "Lead not found"
       });
     }
 
     audit(
       req.session.user.id,
-      "ADMIN_STATUS:" +
-        status,
-      Number(
-        req.params.id
-      )
+      "ADMIN_STATUS:" + status,
+      Number(req.params.id)
     );
 
     res.json({
@@ -1288,24 +1181,22 @@ app.patch(
   }
 );
 
-// CSV EXPORT
 app.get(
   "/api/admin/export",
   requireAdmin,
   (req, res) => {
     const rows =
-      db
-        .prepare(`
-          SELECT
-            l.*,
-            u.username AS agent_username,
-            u.display_name AS agent_name
-          FROM leads l
-          JOIN users u
-            ON u.id=l.agent_id
-          ORDER BY l.id DESC
-        `)
-        .all();
+      db.prepare(`
+        SELECT
+          l.*,
+          u.username AS agent_username,
+          u.display_name AS agent_name
+        FROM leads l
+        JOIN users u
+          ON u.id=l.agent_id
+        ORDER BY l.id DESC
+      `)
+      .all();
 
     const headers = [
       "Lead ID",
@@ -1338,11 +1229,10 @@ app.get(
     ];
 
     const val = v =>
-      `"${String(v ?? "")
-        .replace(
-          /"/g,
-          '""'
-        )}"`;
+      `"${String(v ?? "").replace(
+        /"/g,
+        '""'
+      )}"`;
 
     const lines = [
       headers
@@ -1350,9 +1240,7 @@ app.get(
         .join(",")
     ];
 
-    for (
-      const r of rows
-    ) {
+    for (const r of rows) {
       lines.push(
         [
           r.lead_code,
@@ -1383,8 +1271,8 @@ app.get(
           r.qc_comment,
           r.created_at
         ]
-          .map(val)
-          .join(",")
+        .map(val)
+        .join(",")
       );
     }
 
@@ -1405,12 +1293,11 @@ app.get(
 
     res.send(
       "\uFEFF" +
-        lines.join("\n")
+      lines.join("\n")
     );
   }
 );
 
-// FRONTEND
 app.get(
   "/",
   (req, res) => {
